@@ -212,3 +212,7 @@ async def analyze():
     }
     print("Response Sent" , result)
     return result
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
