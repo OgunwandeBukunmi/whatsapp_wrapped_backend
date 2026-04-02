@@ -19,6 +19,9 @@ def defaultData():
         text = f.read()
     return text
 
+def firstmessage(df):
+    return df.iloc[0]["datetime"]
+
 def to_dataframe(messages):
     df = pd.DataFrame(messages)
 
@@ -179,6 +182,7 @@ async def analyze(file: UploadFile = File(...)):
     df = to_dataframe(messages)
     total_length = df.dropna().shape[0]
 
+
     result = {
         "users": get_names(df),
         "message_stats": message_stats_per_day(df),
@@ -188,6 +192,7 @@ async def analyze(file: UploadFile = File(...)):
         "longest_streak": longest_streak(df),
         "conversation_starters": conversation_starter(df),
         "total_length" : total_length,
+        "first_message" : firstmessage(df)
     }
     print("Response Sent")
     return result
@@ -209,6 +214,7 @@ async def analyze():
         "longest_streak": longest_streak(df),
         "conversation_starters": conversation_starter(df),
         "total_length" : total_length,
+        "first_message" : firstmessage(df)
     }
     print("Response Sent" , result)
     return result
