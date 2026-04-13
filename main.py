@@ -20,43 +20,84 @@ def defaultData():
     return text
 
 def firstmessage(df):
-    return df.iloc[0]["datetime"]
+    if df.empty or "datetime" not in df or df["datetime"].dropna().empty:
+        return None
+    return str(df.dropna(subset=["datetime"]).iloc[0]["datetime"])
 
 def to_dataframe(messages):
     df = pd.DataFrame(messages)
+    if df.empty:
+        df["datetime"] = pd.NaT
+        df["date_only"] = None
+        return df
 
-    df["datetime"] = pd.to_datetime(
-        df["date"] + " " + df["time"],
-        format="%d/%m/%Y %H:%M:%S"
-    )
+    raw = df["date"] + " " + df["time"]
+
+    datetime_formats = [
+        "%d/%m/%Y %H:%M:%S",   # 31/12/2024 14:05:30
+        "%d/%m/%Y %H:%M",      # 31/12/2024 14:05
+        "%m/%d/%Y %H:%M:%S",   # 12/31/2024 14:05:30
+        "%m/%d/%Y %H:%M",      # 12/31/2024 14:05
+        "%d/%m/%Y %I:%M %p",   # 31/12/2024 2:05 pm
+        "%d/%m/%Y %I:%M:%S %p",# 31/12/2024 2:05:30 pm
+        "%m/%d/%y %H:%M",      # 12/31/24 14:05
+        "%d/%m/%y %H:%M",      # 31/12/24 14:05
+    ]
+
+    parsed = pd.Series([pd.NaT] * len(raw), index=raw.index)
+
+    for fmt in datetime_formats:
+        mask = parsed.isna()
+        if not mask.any():
+            break
+        parsed[mask] = pd.to_datetime(raw[mask], format=fmt, errors="coerce")
+
+    # Fallback: let pandas infer anything still unparsed
+    remaining = parsed.isna()
+    if remaining.any():
+        parsed[remaining] = pd.to_datetime(raw[remaining], dayfirst=True, errors="coerce")
+
+    df["datetime"] = parsed
+    print(df["datetime"])
 
     df["date_only"] = df["datetime"].dt.date
 
     return df
-
 def clean_text(text):
     return text.replace("\u200e", "").replace("\r", "")
 
 def parse_chat(text):
-    pattern = r"\[(\d{2}/\d{2}/\d{4}), (\d{2}:\d{2}:\d{2})\] (.*?): (.*)"
-    
+    patterns = [
+        r"\[(\d{2}/\d{2}/\d{4}), (\d{2}:\d{2}:\d{2})\] (.*?): (.*)",  # [date, time]
+        r"(\d{1,2}/\d{1,2}/\d{4}), (\d{1,2}:\d{2}) - (.*?): (.*)",
+         r"(\d{1,2}/\d{1,2}/\d{4}), (\d{1,2}:\d{2})\s?[ap]m - (.*?): (.*)"    # date, time -
+    ]
+
+   
     messages = []
     current_message = None
 
+    ignored_keywords = [
+        "image omitted",
+        "audio omitted",
+        "video omitted",
+        "sticker omitted",
+        "Messages and calls are end-to-end encrypted",
+        "<Media omitted>"
+    ]
+
     for line in text.split("\n"):
-        match = re.match(pattern, line)
+        line = line.strip()
 
-        ignored_keywords = [
-            "image omitted",
-            "audio omitted",
-            "video omitted",
-            "sticker omitted",
-            "Messages and calls are end-to-end encrypted",
-            "<Media omitted>"
-        ]
+        # 🔥 Normalize weird unicode spaces (VERY IMPORTANT)
+        line = line.replace("\u202f", " ")  # fixes "11:06 pm"
 
-        # inside your parser, after extracting message:
+        match = None
 
+        for p in patterns:
+            match = re.match(p, line, re.IGNORECASE)
+            if match:
+                break
 
         if match:
             date, time, sender, message = match.groups()
@@ -67,40 +108,70 @@ def parse_chat(text):
                 "sender": sender,
                 "message": message
             }
-            if any(keyword in current_message["message"] for keyword in ignored_keywords):
-                continue 
+
+            if any(keyword.lower() in message.lower() for keyword in ignored_keywords):
+                current_message = None
+                continue
+
             messages.append(current_message)
 
         else:
-            # Handle multi-line messages (VERY IMPORTANT)
             if current_message:
-                current_message["message"] += " " + line.strip()
+                current_message["message"] += " " + line
+
+    if not messages:
+        raise ValueError("No messages parsed — format mismatch")
 
     return messages
-
 
 def get_names(df):
     return df["sender"].dropna().unique().tolist()
 
 def message_stats_per_day(df):
-    counts = df.groupby("date_only").size()
+    if df.empty or "datetime" not in df.columns:
+        return {
+            "longest_day": None,
+            "max_messages": 0,
+            "daily_counts": {}
+        }
+
+    df = df.dropna(subset=["datetime"])
+
+    if df.empty:
+        return {
+            "longest_day": None,
+            "max_messages": 0,
+            "daily_counts": {}
+        }
+
+    counts = df.groupby(df["datetime"].dt.date).size()
+
+    if counts.empty:
+        return {
+            "longest_day": None,
+            "max_messages": 0,
+            "daily_counts": {}
+        }
 
     return {
         "longest_day": str(counts.idxmax()),
-        "longest_count": int(counts.max()),
         "shortest_day": str(counts.idxmin()),
-        "shortest_count": int(counts.min())
+        "max_messages": int(counts.max()),
+        "min_messages": int(counts.min()),
+        "daily_counts": counts.to_dict()
     }
 
 def word_stats(df):
-    text = " ".join(df["message"]).lower()
+    if df.empty or "message" not in df:
+        return {"most_common": [], "least_common": []}
+
+    text = " ".join(df["message"].dropna()).lower()
 
     words = re.findall(r"\b\w+\b", text)
-    
-    # stopwords = {"the", "is", "and", "i", "that" , "you" , "to" , "it" , "and" , "t" , "s" , "a" , "an" , "that" , "like" , "me", "not" , "what" , "we" , ""
-    # }
 
-    # words = [w for w in words if w not in stopwords]
+    if not words:
+        return {"most_common": [], "least_common": []}
+
     counter = Counter(words)
 
     most_common = counter.most_common(20)
@@ -110,57 +181,85 @@ def word_stats(df):
         "most_common": most_common,
         "least_common": least_common
     }
-
 def longest_silence(df):
-    df = df.sort_values("datetime").reset_index(drop=True)
+    if df.empty or "datetime" not in df:
+        return None
 
-    # Calculate time differences
+    df = df.dropna(subset=["datetime"]).sort_values("datetime")
+
+    if len(df) < 2:
+        return None
+
     df["gap"] = df["datetime"].diff()
 
-    # Find index of the largest gap
-    max_gap_index = df["gap"].idxmax()
+    gaps = df["gap"].dropna()
 
-    # Get the two timestamps
-    end_time = df.loc[max_gap_index, "datetime"]
-    start_time = df.loc[max_gap_index - 1, "datetime"]
+    if gaps.empty:
+        return None
 
-    max_gap = df.loc[max_gap_index, "gap"]
+    max_gap_index = gaps.idxmax()
+    pos = df.index.get_loc(max_gap_index)
+
+    if pos == 0:
+        return None
 
     return {
-        "start_of_silence": str(start_time),
-        "end_of_silence": str(end_time),
-        "duration": str(max_gap)
+        "start": str(df.iloc[pos - 1]["datetime"]),
+        "end": str(df.iloc[pos]["datetime"]),
+        "duration": str(df.iloc[pos]["gap"])
     }
-
 def average_messages(df):
-    daily_counts = df.groupby("date_only").size()
+    if df.empty or "date_only" not in df:
+        return 0.0
+
+    daily_counts = df.dropna(subset=["date_only"]).groupby("date_only").size()
+
+    if daily_counts.empty:
+        return 0.0
+
     return float(daily_counts.mean())
 
 
 def longest_streak(df):
-    days = sorted(df["date_only"].unique())
+    if df.empty or "date_only" not in df:
+        return 0
+
+    days = sorted(df["date_only"].dropna().unique())
+
+    if len(days) == 0:
+        return 0
 
     streak = 1
     max_streak = 1
 
     for i in range(1, len(days)):
-        if (days[i] - days[i-1]).days == 1:
+        if (days[i] - days[i - 1]).days == 1:
             streak += 1
             max_streak = max(max_streak, streak)
         else:
             streak = 1
 
     return max_streak
-
+    
 def conversation_starter(df):
+    if df.empty or "datetime" not in df:
+        return {}
+
+    df = df.dropna(subset=["datetime"])
+
+    if df.empty:
+        return {}
+
     first_messages = (
         df.sort_values("datetime")
           .groupby("date_only")
           .first()
     )
 
-    return first_messages["sender"].value_counts().to_dict()
+    if "sender" not in first_messages:
+        return {}
 
+    return first_messages["sender"].value_counts().to_dict()
 # @app.post("/upload")
 # async def upload_chat(file: UploadFile = File(...)):
 #     content = await file.read()
@@ -176,13 +275,18 @@ def try_something(df):
 @app.post("/analyze")
 async def analyze(file: UploadFile = File(...)):
     content = await file.read()
-    text = content.decode("utf-8")
-    text = clean_text(text)
+    text = clean_text(content.decode("utf-8"))
     messages = parse_chat(text)
     df = to_dataframe(messages)
+    print(df)
+    if df.empty:
+        return {
+            "error": "No valid messages parsed from chat",
+            "users": [],
+            "total_length": 0
+        }
+
     total_length = df.dropna().shape[0]
-
-
     result = {
         "users": get_names(df),
         "message_stats": message_stats_per_day(df),
@@ -191,11 +295,12 @@ async def analyze(file: UploadFile = File(...)):
         "average_messages_per_day": average_messages(df),
         "longest_streak": longest_streak(df),
         "conversation_starters": conversation_starter(df),
-        "total_length" : total_length,
-        "first_message" : firstmessage(df)
+        "total_length": total_length,
+        "first_message": firstmessage(df)
     }
-    print("Response Sent")
+
     return result
+
 
 @app.get("/default")
 async def analyze():
