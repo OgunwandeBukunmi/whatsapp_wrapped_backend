@@ -8,7 +8,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://whatsapp-wrapped.vercel.app"],
+    allow_origins=["https://whatsappwrapped-omega.vercel.app"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
