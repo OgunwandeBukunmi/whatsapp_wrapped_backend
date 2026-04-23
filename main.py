@@ -181,7 +181,7 @@ def message_stats_per_day(df):
 
 def word_stats(df):
     words_to_ignore = [
-       "u", "dey","it", "media", "omitted", "t","to", "a", "the", "and", "but", "or", "for", "nor", "so", "yet", "with", "on", "in", "at", "by", "to", "from", "about", "as", "into", "like", "through", "after", "over", "between", "out", "against", "during", "without"
+       "u", "dey","it", "s","media", "omitted", "t","to", "a", "the", "and", "but", "or", "for", "nor", "so", "yet", "with", "on", "in", "at", "by", "to", "from", "about", "as", "into", "like", "through", "after", "over", "between", "out", "against", "during", "without"
     ]
     
     if df.empty or "message" not in df:
