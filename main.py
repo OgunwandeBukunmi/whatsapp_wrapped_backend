@@ -95,7 +95,11 @@ def parse_chat(text):
         "sticker omitted",
         "Messages and calls are end-to-end encrypted",
         "<Media omitted>"
+        "message omitted"
+        "edited"
     ]
+
+
 
     for line in text.split("\n"):
         line = line.strip()
@@ -173,15 +177,23 @@ def message_stats_per_day(df):
     }
 
 def word_stats(df):
+    words_to_ignore = [
+        "t","to", "a", "the", "and", "but", "or", "for", "nor", "so", "yet", "with", "on", "in", "at", "by", "to", "from", "about", "as", "into", "like", "through", "after", "over", "between", "out", "against", "during", "without"
+    ]
+    
     if df.empty or "message" not in df:
         return {"most_common": [], "least_common": []}
 
     text = " ".join(df["message"].dropna()).lower()
 
     words = re.findall(r"\b\w+\b", text)
+    
+
 
     if not words:
         return {"most_common": [], "least_common": []}
+
+    words = [w for w in words if w not in words_to_ignore]
 
     counter = Counter(words)
 
