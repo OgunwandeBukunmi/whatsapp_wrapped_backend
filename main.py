@@ -19,6 +19,7 @@ def defaultData():
     with open("chat.txt", "r", encoding="utf-8") as f:
         text = f.read()
     return text
+    
 
 def firstmessage(df):
     if df.empty or "datetime" not in df or df["datetime"].dropna().empty:
