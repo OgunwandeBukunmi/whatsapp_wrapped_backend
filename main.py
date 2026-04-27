@@ -8,7 +8,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "https://whatsappwrapped-omega.vercel.app" , "https://whatsappwrapped.pxxl.click"],
+    allow_origins=["http://localhost:5173", "https://whatsappwrapped-omega.vercel.app" , "https://whatsappwrapped.pxxl.click" , "http://localhost:3003"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -20,6 +20,16 @@ def defaultData():
         text = f.read()
     return text
     
+def format_duration(td):
+    total_seconds = int(td.total_seconds())
+
+    days = total_seconds // 86400
+    hours = (total_seconds % 86400) // 3600
+    minutes = (total_seconds % 3600) // 60
+    seconds = total_seconds % 60
+
+    return f"{days}d {hours}h {minutes}m {seconds}s"
+
 
 def firstmessage(df):
     if df.empty or "datetime" not in df or df["datetime"].dropna().empty:
@@ -211,29 +221,60 @@ def longest_silence(df):
     if df.empty or "datetime" not in df:
         return None
 
-    df = df.dropna(subset=["datetime"]).sort_values("datetime")
+    df = df.dropna(subset=["datetime"]).sort_values("datetime").reset_index(drop=True)
 
-    if len(df) < 2:
+    if len(df) < 1:
         return None
 
+    # 🔹 Calculate past gaps
     df["gap"] = df["datetime"].diff()
-
     gaps = df["gap"].dropna()
 
-    if gaps.empty:
-        return None
+    longest_past = None
 
-    max_gap_index = gaps.idxmax()
-    pos = df.index.get_loc(max_gap_index)
+    if not gaps.empty:
+        max_gap_index = gaps.idxmax()
+        pos = max_gap_index
 
-    if pos == 0:
-        return None
+        longest_past = {
+            "start": df.iloc[pos - 1]["datetime"],
+            "end": df.iloc[pos]["datetime"],
+            "duration": df.iloc[pos]["gap"],
+            "type": "past"
+        }
 
-    return {
-        "start": str(df.iloc[pos - 1]["datetime"]),
-        "end": str(df.iloc[pos]["datetime"]),
-        "duration": str(df.iloc[pos]["gap"])
+    # 🔹 Calculate ongoing silence
+    now = pd.Timestamp.now()
+    last_time = df.iloc[-1]["datetime"]
+    current_gap = now - last_time
+
+    current_silence = {
+        "start": last_time,
+        "end": now,
+        "duration": current_gap,
+        "type": "ongoing"
     }
+
+    # 🔥 Compare both
+    if longest_past is None or current_gap > longest_past["duration"]:
+        result = current_silence
+        result["is_current"] = True
+    else:
+        result = longest_past
+        result["is_current"] = False
+
+    # Optional: convert to string for API response
+
+
+
+    duration_td = result["duration"]  # keep as timedelta
+
+    result["duration"] = format_duration(duration_td)
+    result["start"] = result["start"].strftime("%Y-%m-%d %H:%M:%S")
+    result["end"] = result["end"].strftime("%Y-%m-%d %H:%M:%S")
+
+    
+    return result
 def average_messages(df):
     if df.empty or "date_only" not in df:
         return 0.0
