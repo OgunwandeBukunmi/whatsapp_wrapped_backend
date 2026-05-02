@@ -289,24 +289,34 @@ def average_messages(df):
 
 def longest_streak(df):
     if df.empty or "date_only" not in df:
-        return 0
+        return {"count": 0, "is_current": False}
 
     days = sorted(df["date_only"].dropna().unique())
 
     if len(days) == 0:
-        return 0
+        return {"count": 0, "is_current": False}
+
+    from datetime import date
 
     streak = 1
     max_streak = 1
+    max_streak_end = days[0]
 
     for i in range(1, len(days)):
         if (days[i] - days[i - 1]).days == 1:
             streak += 1
-            max_streak = max(max_streak, streak)
+            if streak > max_streak:
+                max_streak = streak
+                max_streak_end = days[i]
         else:
             streak = 1
 
-    return max_streak
+    today = date.today()
+    # Convert max_streak_end to date if it's a Timestamp
+    end_date = max_streak_end.date() if hasattr(max_streak_end, 'date') else max_streak_end
+    is_current = (today - end_date).days <= 1
+
+    return {"count": max_streak, "is_current": is_current}
     
 def conversation_starter(df):
     if df.empty or "datetime" not in df:
@@ -353,6 +363,7 @@ async def analyze(file: UploadFile = File(...)):
             "total_length": 0
         }
 
+    streak_result = longest_streak(df)
     total_length = df.dropna().shape[0]
     result = {
         "users": get_names(df),
@@ -366,6 +377,66 @@ async def analyze(file: UploadFile = File(...)):
         "first_message": firstmessage(df)
     }
 
+    balance_score = 0
+    silence_penalty = 0
+    effort_score = 0
+    activity_score = 0
+    consistency_score = 0
+
+    activity_score = min(result["average_messages_per_day"] * 2, 100)
+    consistency_score = min(result["longest_streak"]["count"] * 2, 100)
+    
+    starters = list(result["conversation_starters"].values())
+
+    if len(starters) == 2:
+        diff = abs(starters[0] - starters[1])
+        total = sum(starters)
+        balance_score = 100 - (diff / total * 100)
+    else:
+        balance_score = 50
+
+
+    if not result["longest_silence"]:
+        silence_penalty = 0
+    else:
+        td = pd.to_timedelta(result["longest_silence"]["duration"])
+        days = td.total_seconds() / 86400
+
+        silence_penalty =min(days * 2, 25)
+
+    effort_score = min(result["total_length"] / 10, 50)
+
+    final_score = (
+        activity_score * 0.25 +
+        consistency_score * 0.20 +
+        balance_score * 0.25 +
+        effort_score * 0.30
+    ) - silence_penalty 
+    final_score = max(0, min(100, round(final_score)))
+
+    result["activity_score"] = activity_score
+    result["balance_score"] = balance_score
+    result["consistency_score"] = consistency_score
+    result["silence_penalty"] = silence_penalty
+    result["effort_score"] = effort_score
+    result["final_score"] = final_score
+
+    if final_score >= 75:
+        relationship_status = "Just Marry at this point🔥"
+    elif final_score >= 65 and final_score <=74:
+        relationship_status = "Ride or die"
+    elif final_score >= 55 and final_score <=65:
+        relationship_status = "Fucking Good friends"
+    elif final_score >= 40 and final_score <=55:
+        relationship_status = "Better Friends"
+    elif  final_score >= 30 and final_score <=40:
+        relationship_status = "Literally just friends😑"
+    elif relationship_status <=30:
+        relationship_status = "ewww"
+    
+    result["relationship_status"] = relationship_status
+
+
     return result
 
 
@@ -377,6 +448,7 @@ async def analyze():
     df = to_dataframe(messages)
     total_length = df.dropna().shape[0]
 
+
     result = {
         "users": get_names(df),
         "message_stats": message_stats_per_day(df),
@@ -385,12 +457,72 @@ async def analyze():
         "average_messages_per_day": average_messages(df),
         "longest_streak": longest_streak(df),
         "conversation_starters": conversation_starter(df),
-        "total_length" : total_length,
-        "first_message" : firstmessage(df)
+        "total_length": total_length,
+        "first_message": firstmessage(df)
     }
+
+    balance_score = 0
+    silence_penalty = 0
+    effort_score = 0
+    activity_score = 0
+    consistency_score = 0
+    relationship_status = ""
+
+    activity_score = min(result["average_messages_per_day"] * 2, 100)
+    consistency_score = min(result["longest_streak"]["count"] * 2, 100)
+    
+    starters = list(result["conversation_starters"].values())
+
+    if len(starters) == 2:
+        diff = abs(starters[0] - starters[1])
+        total = sum(starters)
+        balance_score = 100 - (diff / total * 100)
+    else:
+        balance_score = 50
+
+
+    if not result["longest_silence"]:
+        silence_penalty = 0
+    else:
+        td = pd.to_timedelta(result["longest_silence"]["duration"])
+        days = td.total_seconds() / 86400
+
+        silence_penalty = min(days * 2, 25)
+
+    effort_score = min(result["total_length"] / 20, 50)
+
+    final_score = (
+        activity_score * 0.25 +
+        consistency_score * 0.20 +
+        balance_score * 0.25 +
+        effort_score * 0.20
+    ) - silence_penalty 
+
+    result["activity_score"] = activity_score
+    result["balance_score"] = balance_score
+    result["consistency_score"] = consistency_score
+    result["silence_penalty"] = silence_penalty
+    result["effort_score"] = effort_score
+    result["final_score"] = final_score
+
+    if final_score >= 75:
+        relationship_status = "Just Marry at this point🔥"
+    elif final_score >= 65 and final_score <=74:
+        relationship_status = "Ride or die"
+    elif final_score >= 55 and final_score <=65:
+        relationship_status = "Fucking Good friends"
+    elif final_score >= 40 and final_score <=55:
+        relationship_status = "Better Friends"
+    elif  final_score >= 30 and final_score <=40:
+        relationship_status = "Literally just friends😑"
+    elif relationship_status <=30:
+        relationship_status = "ewww"
+    
+    result["relationship_status"] = relationship_status
+
     print("Response Sent" , result)
     return result
 
 @app.get("/health")
-async def health():
+def health():
     return {"status": "ok"}
