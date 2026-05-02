@@ -30,6 +30,34 @@ def format_duration(td):
 
     return f"{days}d {hours}h {minutes}m {seconds}s"
 
+def peak_hours(df):
+    df["hour"] = df["datetime"].dt.hour
+    return int(df["hour"].value_counts().idxmax())
+
+def message_share(df):
+    counts = df["sender"].value_counts()
+    total = counts.sum()
+
+    return {k: round(v / total * 100, 1) for k, v in counts.items()}
+
+def ghosting(df, threshold_hours=24):
+    if df.empty or "datetime" not in df:
+        return 0
+
+    # Drop rows with no datetime → ensures valid gaps
+    df = df.dropna(subset=["datetime"]).sort_values("datetime").reset_index(drop=True)
+
+    if len(df) < 2:
+        return 0
+
+    # Calculate time gaps between consecutive messages
+    df["gap"] = df["datetime"].diff()
+    gaps = df["gap"]
+
+    # ghost_events is now a DataFrame containing only rows where gap > threshold
+    ghost_events = gaps[gaps > pd.Timedelta(hours=threshold_hours)]
+
+    return len(ghost_events)
 
 def firstmessage(df):
     if df.empty or "datetime" not in df or df["datetime"].dropna().empty:
@@ -289,14 +317,14 @@ def average_messages(df):
 
 def longest_streak(df):
     if df.empty or "date_only" not in df:
-        return {"count": 0, "is_current": False}
+        return {"count": 0, "is_current": False, "start": None, "end": None}
 
     days = sorted(df["date_only"].dropna().unique())
 
     if len(days) == 0:
-        return {"count": 0, "is_current": False}
+        return {"count": 0, "is_current": False, "start": None, "end": None}
 
-    from datetime import date
+    from datetime import date, timedelta
 
     streak = 1
     max_streak = 1
@@ -314,9 +342,15 @@ def longest_streak(df):
     today = date.today()
     # Convert max_streak_end to date if it's a Timestamp
     end_date = max_streak_end.date() if hasattr(max_streak_end, 'date') else max_streak_end
+    start_date = end_date - timedelta(days=max_streak - 1)
     is_current = (today - end_date).days <= 1
 
-    return {"count": max_streak, "is_current": is_current}
+    return {
+        "count": max_streak,
+        "is_current": is_current,
+        "start": start_date.isoformat(),
+        "end": end_date.isoformat(),
+    }
     
 def conversation_starter(df):
     if df.empty or "datetime" not in df:
@@ -374,7 +408,10 @@ async def analyze(file: UploadFile = File(...)):
         "longest_streak": longest_streak(df),
         "conversation_starters": conversation_starter(df),
         "total_length": total_length,
-        "first_message": firstmessage(df)
+        "first_message": firstmessage(df),
+        "ghosting_count": ghosting(df),
+        "peak_hours": peak_hours(df),
+        "message_share": message_share(df)
     }
 
     balance_score = 0
@@ -427,11 +464,11 @@ async def analyze(file: UploadFile = File(...)):
         relationship_status = "Ride or die"
     elif final_score >= 55 and final_score <=65:
         relationship_status = "Fucking Good friends"
-    elif final_score >= 40 and final_score <=55:
+    elif final_score >= 40 and final_score <=54:
         relationship_status = "Better Friends"
-    elif  final_score >= 30 and final_score <=40:
+    elif  final_score >= 30 and final_score <=39:
         relationship_status = "Literally just friends😑"
-    elif relationship_status <=30:
+    else:
         relationship_status = "ewww"
     
     result["relationship_status"] = relationship_status
@@ -509,13 +546,13 @@ async def analyze():
         relationship_status = "Just Marry at this point🔥"
     elif final_score >= 65 and final_score <=74:
         relationship_status = "Ride or die"
-    elif final_score >= 55 and final_score <=65:
+    elif final_score >= 55 and final_score <=64:
         relationship_status = "Fucking Good friends"
-    elif final_score >= 40 and final_score <=55:
+    elif final_score >= 40 and final_score <=54:
         relationship_status = "Better Friends"
-    elif  final_score >= 30 and final_score <=40:
+    elif  final_score >= 30 and final_score <=39:
         relationship_status = "Literally just friends😑"
-    elif relationship_status <=30:
+    else:
         relationship_status = "ewww"
     
     result["relationship_status"] = relationship_status
